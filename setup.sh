@@ -23,10 +23,10 @@ pip3 install websockify
 echo "📱 Checking Android AVD..."
 avdmanager list avd | grep -q "test_avd"
 if [ $? -ne 0 ]; then
-  echo "Creating Android AVD (ARM64)..."
+  echo "Creating Android AVD (ARM64 AOSP)..."
   echo "no" | avdmanager create avd \
     -n test_avd \
-    -k "system-images;android-33;google_apis;arm64-v8a" \
+    -k "system-images;android-33;default;arm64-v8a" \
     -d "pixel_6"
 fi
 

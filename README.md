@@ -4,7 +4,7 @@ Stream Android emulator ARM64 ke web browser secara real-time, mirip Appetize.io
 
 ## 🚀 Features
 
-- ✅ Android emulator ARM64 di macOS
+- ✅ Android emulator ARM64 AOSP (lightweight) di macOS
 - ✅ Streaming real-time via web browser
 - ✅ Control emulator dari browser
 - ✅ Support touch input
