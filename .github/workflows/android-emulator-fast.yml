@@ -1,0 +1,118 @@
+name: Android Emulator (Fast - Optimized)
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Duration in minutes (max 360)'
+        required: true
+        default: '360'
+
+jobs:
+  stream:
+    runs-on: macos-13
+    timeout-minutes: 360
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: |
+          npm install
+          brew install cloudflare/cloudflare/cloudflared
+          pip3 install websockify
+
+      - name: Clone noVNC
+        run: |
+          git clone --depth 1 --branch v1.4.0 https://github.com/novnc/noVNC.git
+
+      - name: Enable hardware acceleration
+        continue-on-error: true
+        run: |
+          spctl --master-disable
+
+      - name: Start web server
+        run: |
+          node server.js &
+          sleep 2
+
+      - name: Start Cloudflare Tunnel
+        run: |
+          cloudflared tunnel --url http://localhost:3000 > tunnel.log 2>&1 &
+          sleep 10
+          grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 > public_url.txt
+          cat public_url.txt
+
+      - name: Post URL early
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const url = fs.readFileSync('public_url.txt', 'utf8').trim();
+            
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: `🚀 **Starting Emulator...**\n\n🌐 URL: ${url}/vnc.html\n\n⏳ Emulator booting... (2-3 min)\n📱 Device: Pixel 6 ARM64\n🤖 Android: 13 AOSP`
+            });
+
+      - name: Enable VNC
+        run: |
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on -restart -agent -privs -all
+
+      - name: Start websockify
+        run: |
+          websockify --web=./noVNC 6080 localhost:5900 &
+          sleep 2
+
+      - name: Run Android Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: 360
+        with:
+          api-level: 33
+          target: default
+          arch: arm64-v8a
+          profile: pixel_6
+          ram-size: 4096M
+          heap-size: 512M
+          disk-size: 4096M
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none -memory 4096
+          disable-animations: true
+          disable-spellchecker: true
+          script: |
+            echo "✅ Emulator started!"
+            adb devices
+            adb shell settings put global window_animation_scale 0
+            adb shell settings put global transition_animation_scale 0
+            adb shell settings put global animator_duration_scale 0
+            
+            # Update status
+            PUBLIC_URL=$(cat public_url.txt)
+            echo "🎉 Emulator ready at: $PUBLIC_URL/vnc.html"
+            
+            # Keep alive
+            echo "⏱️ Running for ${{ github.event.inputs.duration }} minutes..."
+            sleep $((${{ github.event.inputs.duration }} * 60))
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            *.log
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -f cloudflared || true
+          pkill -f websockify || true

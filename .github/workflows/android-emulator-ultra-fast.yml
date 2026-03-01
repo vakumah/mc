@@ -1,0 +1,100 @@
+name: Android Emulator (Ultra Fast - Pre-cached)
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Duration in minutes'
+        required: true
+        default: '360'
+
+jobs:
+  stream:
+    runs-on: macos-13
+    timeout-minutes: 360
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Cache Android SDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: android-sdk-${{ runner.os }}-33-default-arm64
+
+      - name: Install tools (parallel)
+        run: |
+          npm install &
+          brew install cloudflare/cloudflare/cloudflared &
+          pip3 install websockify &
+          git clone --depth 1 --branch v1.4.0 https://github.com/novnc/noVNC.git &
+          wait
+
+      - name: Start all services
+        run: |
+          # VNC
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on -restart -agent -privs -all &
+          
+          # Websockify
+          websockify --web=./noVNC 6080 localhost:5900 > /dev/null 2>&1 &
+          
+          # Web server
+          node server.js > /dev/null 2>&1 &
+          
+          # Cloudflare tunnel
+          cloudflared tunnel --url http://localhost:3000 > tunnel.log 2>&1 &
+          
+          sleep 8
+
+      - name: Get URL and notify
+        run: |
+          grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 > url.txt
+          URL=$(cat url.txt)
+          echo "PUBLIC_URL=$URL" >> $GITHUB_ENV
+          echo "🌐 $URL/vnc.html"
+
+      - name: Post URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: `🚀 **Emulator Starting!**\n\n🌐 ${process.env.PUBLIC_URL}/vnc.html\n\n⏳ Wait 2-3 min for boot`
+            });
+
+      - name: Run Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        timeout-minutes: 360
+        with:
+          api-level: 33
+          target: default
+          arch: arm64-v8a
+          profile: pixel_6
+          ram-size: 2048M
+          heap-size: 256M
+          disk-size: 2048M
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot-save -camera-back none -camera-front none
+          disable-animations: true
+          script: |
+            adb shell settings put global window_animation_scale 0
+            adb shell settings put global transition_animation_scale 0
+            adb shell settings put global animator_duration_scale 0
+            echo "✅ Ready: $PUBLIC_URL/vnc.html"
+            sleep $((${{ github.event.inputs.duration }} * 60))
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill cloudflared websockify node || true
