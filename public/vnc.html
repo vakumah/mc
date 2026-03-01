@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Android Emulator - Web Viewer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #1a1a1a;
+      color: #fff;
+      overflow: hidden;
+    }
+    .header {
+      background: #2d2d2d;
+      padding: 15px 20px;
+      border-bottom: 1px solid #444;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .header h1 {
+      font-size: 20px;
+      font-weight: 600;
+    }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #4ade80;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .container {
+      display: flex;
+      height: calc(100vh - 60px);
+    }
+    .sidebar {
+      width: 250px;
+      background: #2d2d2d;
+      padding: 20px;
+      border-right: 1px solid #444;
+    }
+    .sidebar h3 {
+      font-size: 14px;
+      margin-bottom: 15px;
+      color: #888;
+      text-transform: uppercase;
+    }
+    .btn {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 10px;
+      background: #3b82f6;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    .btn:hover {
+      background: #2563eb;
+    }
+    .btn-danger {
+      background: #ef4444;
+    }
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+    .viewer {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #000;
+    }
+    #screen {
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+    .info {
+      margin-top: 20px;
+      padding: 15px;
+      background: #1a1a1a;
+      border-radius: 6px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .info p {
+      margin-bottom: 8px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🤖 Android Emulator Web</h1>
+    <div class="status">
+      <div class="status-dot"></div>
+      <span id="status-text">Connected</span>
+    </div>
+  </div>
+  
+  <div class="container">
+    <div class="sidebar">
+      <h3>Controls</h3>
+      <button class="btn" onclick="installApp()">📦 Install APK</button>
+      <button class="btn" onclick="screenshot()">📸 Screenshot</button>
+      <button class="btn" onclick="rotateScreen()">🔄 Rotate</button>
+      <button class="btn btn-danger" onclick="restartEmulator()">🔄 Restart</button>
+      
+      <div class="info">
+        <h3>Info</h3>
+        <p><strong>Device:</strong> Pixel 6</p>
+        <p><strong>Android:</strong> 13 (API 33)</p>
+        <p><strong>Arch:</strong> ARM64</p>
+        <p><strong>Status:</strong> <span id="device-status">Checking...</span></p>
+      </div>
+    </div>
+    
+    <div class="viewer">
+      <iframe id="screen" src="/novnc/vnc.html?autoconnect=true&resize=scale"></iframe>
+    </div>
+  </div>
+
+  <script>
+    // Check emulator status
+    async function checkStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        document.getElementById('device-status').textContent = 
+          data.running ? '✅ Running' : '⏳ Starting...';
+      } catch (err) {
+        document.getElementById('device-status').textContent = '❌ Offline';
+      }
+    }
+
+    function installApp() {
+      const apkPath = prompt('Enter APK path:');
+      if (apkPath) {
+        alert('Installing APK... (implement with adb install)');
+      }
+    }
+
+    function screenshot() {
+      alert('Taking screenshot... (implement with adb screencap)');
+    }
+
+    function rotateScreen() {
+      alert('Rotating screen... (implement with adb shell settings)');
+    }
+
+    function restartEmulator() {
+      if (confirm('Restart emulator?')) {
+        alert('Restarting... (implement with adb reboot)');
+      }
+    }
+
+    // Check status every 5 seconds
+    setInterval(checkStatus, 5000);
+    checkStatus();
+  </script>
+</body>
+</html>

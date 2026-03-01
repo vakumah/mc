@@ -1,0 +1,6 @@
+node_modules/
+noVNC/
+*.pid
+*.log
+.DS_Store
+public/uploads/
