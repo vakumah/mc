@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm install
-          pip3 install websockify
+          pip3 install websockify --break-system-packages
           
       - name: Clone noVNC
         run: |
