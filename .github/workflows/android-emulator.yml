@@ -1,4 +1,4 @@
-name: macos-vnc-bore
+name: macos-vnc-bore-tigervnc
 
 on: workflow_dispatch
 
@@ -6,24 +6,38 @@ jobs:
   run:
     runs-on: macos-latest
     steps:
+      - name: Install TigerVNC and dependencies
+        run: |
+          brew update
+          brew install tigervnc
+          brew install --cask xquartz
+
+      - name: Setup VNC password
+        run: |
+          mkdir -p ~/.vnc
+          echo "password123" | vncpasswd -f > ~/.vnc/passwd
+          chmod 600 ~/.vnc/passwd
+          cat > ~/.vnc/xstartup << 'EOF'
+#!/bin/sh
+xterm &
+EOF
+          chmod +x ~/.vnc/xstartup
+
+      - name: Start VNC server
+        run: |
+          vncserver -kill :1 || true
+          vncserver :1 -geometry 1280x720 -depth 24 -localhost no
+          sleep 3
+
       - name: Install bore
         run: |
           curl -L -o bore.tar.gz https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-apple-darwin.tar.gz
           tar -xzf bore.tar.gz
           sudo mv bore /usr/local/bin/bore
 
-      - name: Enable Screen Sharing and set VNC password
+      - name: Start bore tunnel to port 5901
         run: |
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -activate -configure -access -on \
-            -clientopts -setvnclegacy -vnclegacy yes \
-            -restart -agent -privs -all -allowAccessFor -allUsers
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -configure -setvncpw -vncpw password123
-
-      - name: Start bore tunnel
-        run: |
-          bore local 5900 --to bore.pub > bore.log 2>&1 &
+          bore local 5901 --to bore.pub > bore.log 2>&1 &
           sleep 5
           cat bore.log
 
