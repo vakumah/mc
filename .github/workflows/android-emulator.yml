@@ -4,35 +4,28 @@ on: workflow_dispatch
 
 jobs:
   run:
-    runs-on: macos-latest   # Gunakan runner macOS hosted
+    runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install bore CLI
+      - name: Install bore
         run: |
-          curl -sL https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-apple-darwin.tar.gz | tar -xz
-          sudo mv bore /usr/local/bin/
+          curl -L -o bore.tar.gz https://github.com/ekzhang/bore/releases/download/v0.6.0/bore-v0.6.0-x86_64-apple-darwin.tar.gz
+          tar -xzf bore.tar.gz
+          sudo mv bore /usr/local/bin/bore
 
-      - name: Enable VNC (Screen Sharing) and Set Password
+      - name: Enable Screen Sharing and set VNC password
         run: |
-          # Aktifkan VNC Server dan beri akses penuh ke semua user
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -activate -configure -access -on -restart -agent -privs -all
-
-          # Izinkan akses VNC untuk user 'runner' (user default di runner GitHub)
+            -activate -configure -access -on \
+            -clientopts -setvnclegacy -vnclegacy yes \
+            -restart -agent -privs -all -allowAccessFor -allUsers
           sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -configure -users runner -access -on -privs -all
+            -configure -setvncpw -vncpw password123
 
-          # Buat password untuk koneksi VNC (ganti 'password123' sesuai keinginan)
-          echo "password123" | perl -we 'print pack "H*", $_' | \
-            sudo tee /Library/Preferences/com.apple.VNCSettings.txt
-
-      - name: Start bore tunnel to VNC port 5900
+      - name: Start bore tunnel
         run: |
           bore local 5900 --to bore.pub > bore.log 2>&1 &
           sleep 5
           cat bore.log
-          echo "✅ VNC session aktif! Konek ke address di atas (port biasanya 5900)."
 
       - name: Keep alive for 6 hours
         run: |
