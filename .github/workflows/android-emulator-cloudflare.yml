@@ -1,124 +1,174 @@
-name: Android Emulator (Cloudflare Tunnel)
+name: Android Redroid Testing
 
 on:
   workflow_dispatch:
     inputs:
       duration:
-        description: 'Duration in minutes (max 360 = 6 hours)'
-        required: true
-        default: '360'
+        description: 'Duration in minutes (max 360)'
+        required: false
+        default: '60'
 
 jobs:
-  stream:
-    runs-on: macos-latest
+  android-test:
+    runs-on: ubuntu-latest
     timeout-minutes: 360
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
     
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
+      
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /usr/local/share/boost
+          df -h
+      
       - name: Install dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y adb scrcpy
+      
+      - name: Install linux-modules-extra for binder
+        run: |
+          sudo apt-get install -y linux-modules-extra-$(uname -r)
+      
+      - name: Load binder module
+        run: |
+          sudo modprobe binder_linux devices="binder,hwbinder,vndbinder"
+          lsmod | grep binder
+      
+      - name: Mount binderfs
+        run: |
+          sudo mkdir -p /dev/binderfs
+          sudo mount -t binder binder /dev/binderfs
+          ls -la /dev/binderfs/
+      
+      - name: Pull Redroid image
+        run: |
+          docker pull redroid/redroid:12.0.0-latest
+      
+      - name: Start Redroid container
+        run: |
+          docker run -itd \
+            --rm \
+            --privileged \
+            --name redroid12 \
+            -v ~/redroid-data:/data \
+            -v /dev/binderfs:/dev/binderfs \
+            -p 5555:5555 \
+            -p 8080:8080 \
+            redroid/redroid:12.0.0-latest
+      
+      - name: Wait for Android boot
+        run: |
+          echo "Waiting for Android to boot..."
+          sleep 40
+      
+      - name: Connect ADB
+        run: |
+          adb kill-server || true
+          adb start-server
+          sleep 2
+          adb connect localhost:5555
+          
+          # Wait for device online
+          for i in {1..30}; do
+            STATUS=$(adb devices | grep "localhost:5555" | awk '{print $2}')
+            if [ "$STATUS" = "device" ]; then
+              echo "✅ Device online!"
+              break
+            fi
+            echo "Waiting for device... ($i/30)"
+            sleep 3
+          done
+      
+      - name: Verify Android
+        run: |
+          adb devices
+          echo "Android Version:"
+          adb -s localhost:5555 shell getprop ro.build.version.release
+          echo "Model:"
+          adb -s localhost:5555 shell getprop ro.product.model
+          echo "CPU ABI:"
+          adb -s localhost:5555 shell getprop ro.product.cpu.abi
+      
+      - name: Setup web access with ws-scrcpy
+        run: |
+          # Clone ws-scrcpy
+          git clone https://github.com/NetrisTV/ws-scrcpy.git
+          cd ws-scrcpy
           npm install
-          pip3 install websockify --break-system-packages
-
-      - name: Clone noVNC
-        run: |
-          git clone https://github.com/novnc/noVNC.git
-          cd noVNC && git checkout v1.4.0
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install system image
-        run: |
-          yes | sdkmanager --licenses || true
-          sdkmanager "platform-tools" "platforms;android-33" "emulator"
-          sdkmanager "system-images;android-33;default;arm64-v8a"
-
-      - name: Create AVD
-        run: |
-          echo "no" | avdmanager create avd \
-            -n test_avd \
-            -k "system-images;android-33;default;arm64-v8a" \
-            -d "pixel_6" --force
-
-      - name: Enable VNC
-        run: |
-          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
-            -activate -configure -access -on -restart -agent -privs -all
-
-      - name: Start services
-        run: |
-          # Start websockify
-          websockify --web=./noVNC 6080 localhost:5900 &
           
-          # Start emulator
-          $ANDROID_HOME/emulator/emulator -avd test_avd \
-            -no-audio -no-boot-anim -gpu swiftshader_indirect -no-window &
+          # Start ws-scrcpy server di background
+          nohup npm start > ../scrcpy-web.log 2>&1 &
+          sleep 15
           
-          # Wait for boot
-          adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
-          
-          # Start web server
-          node server.js &
-          
-          sleep 5
-
+          echo "ws-scrcpy started on port 8000"
+          cd ..
+      
       - name: Setup Cloudflare Tunnel
         run: |
-          # Install cloudflared
-          brew install cloudflare/cloudflare/cloudflared
+          # Download cloudflared
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
           
-          # Start tunnel (no auth needed for quick tunnels)
-          cloudflared tunnel --url http://localhost:3000 > tunnel.log 2>&1 &
+          # Start tunnel untuk ws-scrcpy
+          nohup cloudflared tunnel --url http://localhost:8000 > tunnel.log 2>&1 &
+          sleep 15
           
-          sleep 10
-          
-          # Extract URL
-          grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 > public_url.txt
-          
-          PUBLIC_URL=$(cat public_url.txt)
-          echo "✅ Access emulator at: $PUBLIC_URL/vnc.html"
-
-      - name: Post URL to commit
-        continue-on-error: true
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const url = fs.readFileSync('public_url.txt', 'utf8').trim();
-            
-            await github.rest.repos.createCommitComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: `🚀 **Android Emulator Live!**\n\n🌐 ${url}/vnc.html\n\n⏱️ Active for ${{ github.event.inputs.duration }} min`
-            });
-
-      - name: Keep alive
+          # Ambil URL dari log
+          echo "=== Cloudflare Tunnel URL ==="
+          grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1 | tee tunnel-url.txt
+          echo "============================"
+      
+      - name: Display access info
         run: |
-          echo "Running for ${{ github.event.inputs.duration }} minutes..."
-          cat public_url.txt
-          sleep $((${{ github.event.inputs.duration }} * 60))
-
+          echo ""
+          echo "🎮 ===== ANDROID REDROID READY ====="
+          echo ""
+          echo "📱 Android Version: $(adb -s localhost:5555 shell getprop ro.build.version.release)"
+          echo "🔗 Web Access URL:"
+          cat tunnel-url.txt || echo "Check tunnel.log for URL"
+          echo ""
+          echo "⏱️  Session will run for ${{ github.event.inputs.duration }} minutes"
+          echo ""
+          echo "📋 ADB Commands you can use:"
+          echo "   adb -s localhost:5555 shell"
+          echo "   adb -s localhost:5555 install app.apk"
+          echo ""
+      
+      - name: Keep session alive
+        run: |
+          DURATION=${{ github.event.inputs.duration }}
+          echo "Keeping session alive for ${DURATION} minutes..."
+          
+          # Show tunnel URL every 5 minutes
+          for i in $(seq 1 $((DURATION / 5))); do
+            echo ""
+            echo "=== Session active - Minute $((i * 5))/${DURATION} ==="
+            echo "Tunnel URL:"
+            cat tunnel-url.txt 2>/dev/null || grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1
+            echo ""
+            
+            # Show device status
+            adb devices | grep localhost:5556 || echo "Device offline, reconnecting..."
+            
+            sleep 300
+          done
+      
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: redroid-logs
+          path: |
+            tunnel.log
+            scrcpy-web.log
+      
       - name: Cleanup
         if: always()
         run: |
-          pkill -f emulator || true
-          pkill -f websockify || true
-          pkill -f cloudflared || true
+          docker stop redroid12 || true
+          pkill cloudflared || true
+          pkill node || true
