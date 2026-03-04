@@ -79,7 +79,40 @@ jobs:
       - name: Download Cuttlefish
         run: |
           echo "Downloading Cuttlefish host package..."
-          wget https://ci.android.com/builds/latest/branches/aosp-main/targets/aosp_cf_arm64_phone-trunk_staging-userdebug/view/cvd-host_package.tar.gz
+          
+          # Try direct download with proper URL
+          curl -L -o cvd-host_package.tar.gz \
+            "https://ci.android.com/builds/submitted/latest/aosp_cf_arm64_phone-trunk_staging-userdebug/latest/cvd-host_package.tar.gz" || \
+          curl -L -o cvd-host_package.tar.gz \
+            "https://storage.googleapis.com/android-build-artifacts/builds/latest/branches/aosp-main/targets/aosp_cf_arm64_phone-trunk_staging-userdebug/cvd-host_package.tar.gz" || \
+          {
+            echo "⚠️  Failed to download from ci.android.com"
+            echo "Trying to get download link from build page..."
+            
+            # Get the actual download link from the page
+            BUILD_PAGE=$(curl -sL "https://ci.android.com/builds/latest/branches/aosp-main/targets/aosp_cf_arm64_phone-trunk_staging-userdebug/latest")
+            DOWNLOAD_URL=$(echo "$BUILD_PAGE" | grep -oP 'href="\K[^"]*cvd-host_package\.tar\.gz[^"]*' | head -1)
+            
+            if [ ! -z "$DOWNLOAD_URL" ]; then
+              echo "Found download URL: $DOWNLOAD_URL"
+              curl -L -o cvd-host_package.tar.gz "$DOWNLOAD_URL"
+            else
+              echo "❌ Could not find download URL"
+              exit 1
+            fi
+          }
+          
+          # Verify it's actually a gzip file
+          echo "Verifying downloaded file..."
+          file cvd-host_package.tar.gz
+          
+          if file cvd-host_package.tar.gz | grep -q "gzip compressed"; then
+            echo "✓ Valid gzip file"
+          else
+            echo "❌ Not a valid gzip file, showing content:"
+            head -20 cvd-host_package.tar.gz
+            exit 1
+          fi
           
           echo "Extracting Cuttlefish..."
           mkdir -p cuttlefish
@@ -92,8 +125,16 @@ jobs:
         run: |
           echo "Downloading Android system image..."
           cd cuttlefish
-          wget https://ci.android.com/builds/latest/branches/aosp-main/targets/aosp_cf_arm64_phone-trunk_staging-userdebug/view/cvd-host_package.tar.gz -O image.zip || \
-          echo "Using alternative image source..."
+          
+          # Download actual image files
+          wget -O aosp_cf_arm64_phone-img.zip \
+            "https://ci.android.com/builds/latest/branches/aosp-main/targets/aosp_cf_arm64_phone-trunk_staging-userdebug/latest/raw/aosp_cf_arm64_phone-img-*.zip" || \
+          echo "⚠️  Image download failed, will try alternative..."
+          
+          if [ -f aosp_cf_arm64_phone-img.zip ]; then
+            unzip -q aosp_cf_arm64_phone-img.zip
+            ls -lh
+          fi
           
       - name: Setup Cloudflare Tunnel
         env:
